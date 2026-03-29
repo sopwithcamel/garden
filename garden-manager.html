@@ -1270,6 +1270,8 @@ function renderPlant(id) {
 // ═══════════════════════════════════════════════════
 // AI CORRECTIONS
 // ═══════════════════════════════════════════════════
+const _pendingAiUpdates = {};   // keyed by plant id
+
 async function doAiCorrection(id) {
   const input = (document.getElementById('ai-correction-input') || {}).value?.trim();
   if (!input) return;
@@ -1331,6 +1333,7 @@ Only include fields that should change based on the correction.`;
     const data = await resp.json();
     const text = (data.content?.[0]?.text || '').replace(/^```(?:json)?\n?/,'').replace(/\n?```$/,'').trim();
     const updates = JSON.parse(text);
+    _pendingAiUpdates[id] = updates;
     showAiResult(id, updates);
   } catch(err) {
     status.textContent = `Error: ${err.message}`;
@@ -1362,13 +1365,12 @@ function showAiResult(id, updates) {
       <div class="text-xs text-gray-400 mb-1">${labels[k]||k}</div>${display}</div>`;
   }).join('');
 
-  const safeData = JSON.stringify(updates).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
   result.innerHTML = `
     <div class="border border-green-200 rounded-xl overflow-hidden">
       <div class="bg-green-50 px-4 py-2 text-xs font-semibold text-green-700">✨ Suggested Changes (${keys.length} field${keys.length>1?'s':''})</div>
       ${rows}
       <div class="bg-gray-50 px-4 py-3 flex gap-2 border-t border-green-100">
-        <button onclick="applyAiCorrection('${id}', '${safeData}')"
+        <button id="ai-apply-btn-${id}" onclick="applyAiCorrection('${id}')"
           class="bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-800">
           ✅ Apply Changes
         </button>
@@ -1380,8 +1382,11 @@ function showAiResult(id, updates) {
     </div>`;
 }
 
-async function applyAiCorrection(id, updatesJson) {
-  const updates = JSON.parse(updatesJson.replace(/\\'/g,"'"));
+async function applyAiCorrection(id) {
+  const updates = _pendingAiUpdates[id];
+  if (!updates) return;
+  const btn = document.getElementById(`ai-apply-btn-${id}`);
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
   showLoading('Saving corrections…');
   try {
     await upsertSettings(id, updates);
