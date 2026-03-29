@@ -3,9 +3,10 @@
 // project's Environment Variables.
 const fs = require('fs');
 
-const url  = process.env.SUPABASE_URL         || '';
-const key  = process.env.SUPABASE_KEY         || '';
-const hash = process.env.GARDEN_PASSWORD_HASH || '';
+const url    = process.env.SUPABASE_URL         || '';
+const key    = process.env.SUPABASE_KEY         || '';
+const hash   = process.env.GARDEN_PASSWORD_HASH || '';
+const claude = process.env.CLAUDE_API_KEY       || '';
 
 if (!url || !key) {
   console.warn('⚠️  SUPABASE_URL or SUPABASE_KEY is not set. The app will show the setup screen.');
@@ -13,11 +14,15 @@ if (!url || !key) {
 if (!hash) {
   console.warn('⚠️  GARDEN_PASSWORD_HASH is not set. The app will run without a password gate.');
 }
+if (!claude) {
+  console.warn('⚠️  CLAUDE_API_KEY is not set. The AI correction feature will be hidden.');
+}
 
 let html = fs.readFileSync('garden-manager.html', 'utf8');
-html = html.replace("const BAKED_URL  = '';",  `const BAKED_URL  = '${url}';`);
-html = html.replace("const BAKED_KEY  = '';",  `const BAKED_KEY  = '${key}';`);
-html = html.replace("const BAKED_HASH = '';",  `const BAKED_HASH = '${hash}';`);
+html = html.replace("const BAKED_URL        = '';",  `const BAKED_URL        = '${url}';`);
+html = html.replace("const BAKED_KEY        = '';",  `const BAKED_KEY        = '${key}';`);
+html = html.replace("const BAKED_HASH       = '';",  `const BAKED_HASH       = '${hash}';`);
+html = html.replace("const BAKED_CLAUDE_KEY = '';",  `const BAKED_CLAUDE_KEY = '${claude}';`);
 
 fs.mkdirSync('dist', { recursive: true });
 fs.writeFileSync('dist/index.html', html);

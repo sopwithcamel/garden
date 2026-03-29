@@ -455,9 +455,10 @@ const SEED = [
 // Use Settings → Generate Family Copy to produce a
 // version with these filled in — share THAT file and
 // no one else ever needs to enter anything.
-const BAKED_URL  = '';
-const BAKED_KEY  = '';
-const BAKED_HASH = '';   // SHA-256 of family password — injected by build.js
+const BAKED_URL        = '';
+const BAKED_KEY        = '';
+const BAKED_HASH       = '';   // SHA-256 of family password — injected by build.js
+const BAKED_CLAUDE_KEY = '';   // Anthropic API key — injected by build.js
 // ─────────────────────────────────────────────────
 
 const CONFIG_KEY = 'garden_supabase_config';
@@ -689,9 +690,13 @@ function buildPlant(seed, settings, logs, photos) {
     lastFertilized:s.last_fertilized || '',
     sunlight:      s.sunlight      || seed.sunlight,
     watering:      s.watering      || seed.watering,
+    waterFreq:     s.water_freq    || seed.waterFreq,
     fertilizer:    s.fertilizer    || seed.fertilizer,
     fertFreq:      s.fert_freq     || seed.fertFreq,
     soil:          s.soil          || seed.soil,
+    recs:          s.recs          || seed.recs,
+    tasks:         s.tasks         || seed.tasks,
+    seasonNote:    s.season_note   || seed.seasonNote,
     notes:         s.notes         || '',
     careLog:       pLogs,
     photos:        pPhotos,
@@ -714,6 +719,10 @@ async function upsertSettings(plantId, fields) {
   if ('fertilizer'     in fields) row.fertilizer       = fields.fertilizer;
   if ('fertFreq'       in fields) row.fert_freq        = fields.fertFreq;
   if ('soil'           in fields) row.soil             = fields.soil;
+  if ('waterFreq'      in fields) row.water_freq       = fields.waterFreq;
+  if ('recs'           in fields) row.recs             = fields.recs || null;
+  if ('tasks'          in fields) row.tasks            = fields.tasks || null;
+  if ('seasonNote'     in fields) row.season_note      = fields.seasonNote || null;
   if ('notes'          in fields) row.notes            = fields.notes;
   const { error } = await sb.from('plant_settings').upsert(row, { onConflict: 'plant_id' });
   if (error) throw error;
@@ -820,6 +829,10 @@ create table if not exists plant_settings (
   fertilizer     text    default null,
   fert_freq      text    default null,
   soil           text    default null,
+  water_freq     text    default null,
+  recs           jsonb   default null,
+  tasks          jsonb   default null,
+  season_note    text    default null,
   updated_at     timestamptz default now()
 );
 
@@ -1229,11 +1242,156 @@ function renderPlant(id) {
     </div>
 
     <!-- Care log -->
-    <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 mb-10">
+    <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 mb-5">
       <h3 class="font-semibold text-gray-800 mb-1">🗒️ Care Log</h3>
       ${logHtml}
     </div>
+
+    <!-- AI Corrections -->
+    ${BAKED_CLAUDE_KEY ? `
+    <div class="bg-white rounded-2xl p-4 shadow-sm border border-green-100 mb-10">
+      <h3 class="font-semibold text-gray-800 mb-1">🤖 AI Correction</h3>
+      <p class="text-xs text-gray-400 mb-3">Describe what's wrong or different about this plant's care info — Claude will suggest updated content.</p>
+      <textarea id="ai-correction-input" rows="3"
+        placeholder="e.g. This plant is in the ground, not a pot. It gets afternoon shade from the east wall."
+        class="w-full border border-gray-200 rounded-xl p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-green-300"></textarea>
+      <div class="mt-2 flex items-center gap-3 flex-wrap">
+        <button onclick="doAiCorrection('${id}')" id="ai-btn-${id}"
+          class="bg-green-700 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-green-800 disabled:opacity-50">
+          ✨ Suggest Updates
+        </button>
+        <span id="ai-status-${id}" class="text-xs text-red-500"></span>
+      </div>
+      <div id="ai-result-${id}" class="mt-4"></div>
+    </div>` : ''}
   </div>`;
+}
+
+// ═══════════════════════════════════════════════════
+// AI CORRECTIONS
+// ═══════════════════════════════════════════════════
+async function doAiCorrection(id) {
+  const input = (document.getElementById('ai-correction-input') || {}).value?.trim();
+  if (!input) return;
+  const p = getPlant(id);
+  const btn = document.getElementById(`ai-btn-${id}`);
+  const status = document.getElementById(`ai-status-${id}`);
+  const result = document.getElementById(`ai-result-${id}`);
+
+  btn.disabled = true; btn.textContent = '⏳ Thinking…';
+  status.textContent = ''; result.innerHTML = '';
+
+  const summary = {
+    commonName: p.commonName, scientificName: p.scientificName, location: p.location,
+    sunlight: p.sunlight, watering: p.watering, waterFreq: p.waterFreq,
+    fertilizer: p.fertilizer, fertFreq: p.fertFreq, soil: p.soil,
+    recs: p.recs, tasks: p.tasks, seasonNote: p.seasonNote
+  };
+
+  const prompt = `You are an expert horticulturist. A user has a correction about their plant's care information.
+
+Plant: ${p.commonName} (${p.scientificName})
+Current data:
+${JSON.stringify(summary, null, 2)}
+
+User correction: "${input}"
+
+Return ONLY a raw JSON object (no markdown, no explanation) containing only the fields that need updating. Allowed fields:
+- "recs": string[] — full updated care recommendation list
+- "tasks": {t:string, p:"urgent"|"high"|"medium"|"low"}[] — full updated task list
+- "seasonNote": string
+- "sunlight": string
+- "watering": string (e.g. "Every 2–3 days")
+- "waterFreq": string (e.g. "every 2-3 days")
+- "fertilizer": string
+- "fertFreq": string
+- "soil": string
+
+Only include fields that should change based on the correction.`;
+
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': BAKED_CLAUDE_KEY,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 2048,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+    if (!resp.ok) {
+      const e = await resp.json().catch(() => ({}));
+      throw new Error(e?.error?.message || `HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    const text = (data.content?.[0]?.text || '').replace(/^```(?:json)?\n?/,'').replace(/\n?```$/,'').trim();
+    const updates = JSON.parse(text);
+    showAiResult(id, updates);
+  } catch(err) {
+    status.textContent = `Error: ${err.message}`;
+  } finally {
+    btn.disabled = false; btn.textContent = '✨ Suggest Updates';
+  }
+}
+
+function showAiResult(id, updates) {
+  const result = document.getElementById(`ai-result-${id}`);
+  const keys = Object.keys(updates || {});
+  if (!keys.length) { result.innerHTML = `<p class="text-sm text-gray-400 mt-2">No changes suggested.</p>`; return; }
+
+  const labels = { recs:'Care Recommendations', tasks:'Gardener Tasks', seasonNote:'Seasonal Advice',
+    sunlight:'Sunlight', watering:'Watering', waterFreq:'Water Frequency',
+    fertilizer:'Fertilizer', fertFreq:'Fertilize Every', soil:'Soil' };
+
+  let rows = keys.map(k => {
+    const v = updates[k];
+    let display;
+    if (k === 'recs' && Array.isArray(v)) {
+      display = `<ul class="list-disc ml-4 space-y-1 text-sm text-gray-700">${v.map(r=>`<li>${escHtml(r)}</li>`).join('')}</ul>`;
+    } else if (k === 'tasks' && Array.isArray(v)) {
+      display = v.map(t=>`<div class="flex gap-2 text-sm"><span class="font-semibold ${t.p==='urgent'||t.p==='high'?'text-red-600':'text-amber-600'} w-14 flex-shrink-0">${t.p}</span><span class="text-gray-700">${escHtml(t.t)}</span></div>`).join('');
+    } else {
+      display = `<p class="text-sm text-gray-700">${escHtml(String(v))}</p>`;
+    }
+    return `<div class="px-4 py-3 border-t border-green-100">
+      <div class="text-xs text-gray-400 mb-1">${labels[k]||k}</div>${display}</div>`;
+  }).join('');
+
+  const safeData = JSON.stringify(updates).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+  result.innerHTML = `
+    <div class="border border-green-200 rounded-xl overflow-hidden">
+      <div class="bg-green-50 px-4 py-2 text-xs font-semibold text-green-700">✨ Suggested Changes (${keys.length} field${keys.length>1?'s':''})</div>
+      ${rows}
+      <div class="bg-gray-50 px-4 py-3 flex gap-2 border-t border-green-100">
+        <button onclick="applyAiCorrection('${id}', '${safeData}')"
+          class="bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-800">
+          ✅ Apply Changes
+        </button>
+        <button onclick="document.getElementById('ai-result-${id}').innerHTML=''"
+          class="bg-gray-200 text-gray-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-300">
+          Dismiss
+        </button>
+      </div>
+    </div>`;
+}
+
+async function applyAiCorrection(id, updatesJson) {
+  const updates = JSON.parse(updatesJson.replace(/\\'/g,"'"));
+  showLoading('Saving corrections…');
+  try {
+    await upsertSettings(id, updates);
+    hideLoading();
+    document.getElementById('app').innerHTML = renderPlant(id);
+    window.scrollTo(0, 0);
+  } catch(err) {
+    hideLoading();
+    alert(`Error saving: ${err.message}`);
+  }
 }
 
 function chip(icon, label, value) {
