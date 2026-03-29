@@ -455,8 +455,9 @@ const SEED = [
 // Use Settings → Generate Family Copy to produce a
 // version with these filled in — share THAT file and
 // no one else ever needs to enter anything.
-const BAKED_URL = '';
-const BAKED_KEY = '';
+const BAKED_URL  = '';
+const BAKED_KEY  = '';
+const BAKED_HASH = '';   // SHA-256 of family password — injected by build.js
 // ─────────────────────────────────────────────────
 
 const CONFIG_KEY = 'garden_supabase_config';
@@ -471,6 +472,131 @@ function setConfig(url, key) {
 }
 function clearConfig() {
   localStorage.removeItem(CONFIG_KEY);
+}
+
+// ═══════════════════════════════════════════════════
+// AUTH — password gate + brute-force protection
+// ═══════════════════════════════════════════════════
+const AUTH_SESSION_KEY  = 'garden_auth_session';
+const AUTH_ATTEMPTS_KEY = 'garden_auth_attempts';
+const SESSION_DAYS      = 30;
+const MAX_ATTEMPTS      = 5;
+const LOCKOUT_MS        = 15 * 60 * 1000;  // 15 minutes
+
+async function sha256(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+function isAuthRequired() { return !!BAKED_HASH; }
+
+function checkAuthSession() {
+  if (!isAuthRequired()) return true;
+  try {
+    const s = JSON.parse(localStorage.getItem(AUTH_SESSION_KEY));
+    if (!s || !s.ts) return false;
+    return (Date.now() - s.ts) / 86400000 < SESSION_DAYS;
+  } catch { return false; }
+}
+
+function setAuthSession()   { localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify({ ts: Date.now() })); }
+function clearAuthSession() { localStorage.removeItem(AUTH_SESSION_KEY); }
+
+function getAttempts() {
+  try { return JSON.parse(localStorage.getItem(AUTH_ATTEMPTS_KEY)) || { count:0, lockedUntil:0 }; }
+  catch { return { count:0, lockedUntil:0 }; }
+}
+function saveAttempts(a) { localStorage.setItem(AUTH_ATTEMPTS_KEY, JSON.stringify(a)); }
+
+function recordFailedAttempt() {
+  const a = getAttempts();
+  a.count = (a.count || 0) + 1;
+  if (a.count >= MAX_ATTEMPTS) { a.lockedUntil = Date.now() + LOCKOUT_MS; a.count = 0; }
+  saveAttempts(a);
+  return a;
+}
+function clearAttempts() { localStorage.removeItem(AUTH_ATTEMPTS_KEY); }
+
+function renderLogin(msg = '') {
+  document.getElementById('nav-links').innerHTML = '';
+  const a = getAttempts();
+  const locked = a.lockedUntil && Date.now() < a.lockedUntil;
+  const left = MAX_ATTEMPTS - (a.count || 0);
+  document.getElementById('app').innerHTML = `
+    <div class="flex items-center justify-center min-h-[80vh]">
+      <div class="bg-white rounded-2xl shadow-xl p-8 w-full max-w-sm">
+        <div class="text-center mb-6">
+          <div class="text-5xl mb-3">🌿</div>
+          <div class="text-xl font-bold text-green-800">Amur Family Garden</div>
+          <div class="text-sm text-gray-500 mt-1">Enter the family password to continue</div>
+        </div>
+        ${locked ? `
+          <div class="bg-red-50 border border-red-200 rounded-xl p-4 text-center">
+            <div class="text-red-700 font-semibold mb-1">🔒 Too many attempts</div>
+            <div class="text-red-600 text-sm">Locked for <span id="lockout-cd" class="font-mono font-bold"></span></div>
+          </div>
+        ` : `
+          <form id="login-form" onsubmit="return false">
+            <div class="mb-4 relative">
+              <input id="pwd-input" type="password"
+                class="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-base focus:border-green-500 focus:outline-none pr-12"
+                placeholder="Password" autocomplete="current-password">
+              <button type="button" onclick="togglePwd()"
+                class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-lg select-none"
+                tabindex="-1">👁</button>
+            </div>
+            ${msg ? `<div class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-2 mb-3">${escHtml(msg)}</div>` : ''}
+            ${a.count > 0 ? `<div class="text-amber-600 text-xs text-center mb-3">⚠️ ${left} attempt${left!==1?'s':''} remaining before 15-min lockout</div>` : ''}
+            <button onclick="doLogin()"
+              class="w-full bg-green-700 hover:bg-green-800 text-white font-semibold py-3 rounded-xl transition-colors">
+              Unlock Garden 🌱
+            </button>
+          </form>
+        `}
+      </div>
+    </div>`;
+  if (locked) {
+    (function tick() {
+      const el = document.getElementById('lockout-cd');
+      if (!el) return;
+      const rem = a.lockedUntil - Date.now();
+      if (rem <= 0) { a.lockedUntil = 0; a.count = 0; saveAttempts(a); renderLogin(); return; }
+      const m = Math.floor(rem/60000), s = Math.floor((rem%60000)/1000);
+      el.textContent = `${m}:${String(s).padStart(2,'0')}`;
+      setTimeout(tick, 1000);
+    })();
+  } else {
+    const inp = document.getElementById('pwd-input');
+    if (inp) { inp.focus(); inp.addEventListener('keydown', e => { if (e.key==='Enter') doLogin(); }); }
+  }
+}
+
+function togglePwd() {
+  const inp = document.getElementById('pwd-input');
+  if (inp) inp.type = inp.type==='password' ? 'text' : 'password';
+}
+
+async function doLogin() {
+  const inp = document.getElementById('pwd-input');
+  if (!inp || !inp.value) { if(inp) inp.focus(); return; }
+  const a = getAttempts();
+  if (a.lockedUntil && Date.now() < a.lockedUntil) return;
+  const hash = await sha256(inp.value);
+  if (hash === BAKED_HASH) {
+    clearAttempts();
+    setAuthSession();
+    await startGarden();
+  } else {
+    inp.value = '';
+    const updated = recordFailedAttempt();
+    renderLogin(updated.lockedUntil && Date.now() < updated.lockedUntil
+      ? '' : 'Incorrect password. Please try again.');
+  }
+}
+
+function doLogout() {
+  clearAuthSession();
+  renderLogin();
 }
 
 // Generates a pre-configured copy of this HTML file and triggers a download.
@@ -1422,18 +1548,16 @@ function navLinks() {
     <a href="#tasks" class="px-3 py-2 rounded hover:bg-green-700 transition-colors font-medium">📋 Tasks</a>
     <a href="#add"   class="px-3 py-2 rounded hover:bg-green-700 transition-colors font-medium">➕ Add</a>
     <button onclick="syncNow()" class="px-3 py-2 rounded hover:bg-green-700 transition-colors font-medium" title="Sync">🔄</button>
-    <button onclick="showSettings()" class="px-3 py-2 rounded hover:bg-green-700 transition-colors font-medium" title="Settings">⚙️</button>`;
+    <button onclick="showSettings()" class="px-3 py-2 rounded hover:bg-green-700 transition-colors font-medium" title="Settings">⚙️</button>
+    ${isAuthRequired() ? `<button onclick="doLogout()" class="px-3 py-2 rounded hover:bg-green-700 transition-colors font-medium text-green-300" title="Log out">🔒</button>` : ''}`;
 }
 
 // ═══════════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════════
-async function init() {
+async function startGarden() {
   const config = getConfig();
-  if (!config) {
-    renderSetup();
-    return;
-  }
+  if (!config) { renderSetup(); return; }
   try {
     initClient(config.url, config.key);
     await loadData();
@@ -1448,6 +1572,14 @@ async function init() {
         <button onclick="showSettings()" class="bg-red-700 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-red-800">⚙️ Check Settings</button>
       </div>`;
   }
+}
+
+async function init() {
+  if (isAuthRequired() && !checkAuthSession()) {
+    renderLogin();
+    return;
+  }
+  await startGarden();
 }
 
 init();
