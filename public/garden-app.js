@@ -522,7 +522,11 @@ function doLogout() { clearAuthSession(); renderLogin(); }
 let sb = null;
 function initStorageClient() {
   if (!sb && SUPABASE_URL && SUPABASE_KEY) {
-    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    try {
+      sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    } catch(e) {
+      console.warn('[garden] Supabase storage init failed (photos will be unavailable):', e.message);
+    }
   }
 }
 
