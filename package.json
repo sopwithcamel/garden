@@ -1,9 +1,18 @@
 {
   "name": "garden-manager",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "scripts": {
-    "build": "node build.js"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "next": "14.2.29",
+    "react": "^18",
+    "react-dom": "^18",
+    "postgres": "^3.4.4",
+    "@supabase/supabase-js": "^2"
   },
   "engines": {
     "node": ">=18"
