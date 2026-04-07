@@ -14,6 +14,10 @@ export async function GET() {
     return NextResponse.json({ settings, careEvents, photos, userPlants });
   } catch (err) {
     console.error('[GET /api/data]', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    // Include err.code for connection diagnostics (e.g. ECONNREFUSED, ETIMEDOUT)
+    return NextResponse.json(
+      { error: err.message, code: err.code || null, hint: 'Check DATABASE_URL and that port 5432 is reachable from Vercel.' },
+      { status: 500 }
+    );
   }
 }

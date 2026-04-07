@@ -540,7 +540,7 @@ async function apiFetch(path, opts = {}) {
     ...opts,
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  if (!res.ok) throw new Error(data.error ? `${data.error}${data.code ? ` [${data.code}]` : ''}` : `HTTP ${res.status}`);
   return data;
 }
 
