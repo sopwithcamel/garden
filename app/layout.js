@@ -21,18 +21,38 @@ export default function RootLayout({ children }) {
           rel="stylesheet"
         />
         <link rel="stylesheet" href="/garden.css" />
+
+        {/*
+          Inject config synchronously — guaranteed to run before any deferred
+          script reads window.__G__. dangerouslySetInnerHTML bypasses React's
+          escaping so the JSON is not double-encoded.
+        */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `window.__G__ = ${JSON.stringify(cfg)};`,
+          }}
+        />
       </head>
       <body className="bg-green-50 min-h-screen">
         {children}
 
-        {/* CDN libs load before our app script */}
-        <Script src="https://cdn.tailwindcss.com" strategy="beforeInteractive" />
-        <Script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" strategy="beforeInteractive" />
+        {/*
+          Load CDN libs before our app script so window.supabase is available.
+          beforeInteractive = injected into <head> by Next.js, runs before hydration.
+        */}
+        <Script
+          src="https://cdn.tailwindcss.com"
+          strategy="beforeInteractive"
+        />
+        <Script
+          src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"
+          strategy="beforeInteractive"
+        />
 
-        {/* Inject config THEN run app — both after React hydration */}
-        <Script id="garden-config" strategy="afterInteractive">
-          {`window.__G__ = ${JSON.stringify(cfg)};`}
-        </Script>
+        {/*
+          garden-app.js runs after React hydration completes, so it never
+          conflicts with server-rendered HTML.
+        */}
         <Script src="/garden-app.js" strategy="afterInteractive" />
       </body>
     </html>
