@@ -1,5 +1,5 @@
-'use client';
-
+// Server Component — no 'use client' needed, no React event handlers.
+// The lightbox click listener is attached by garden-app.js at runtime.
 export default function Page() {
   return (
     <>
@@ -13,21 +13,19 @@ export default function Page() {
               <div className="text-green-300 text-xs" id="nav-subtitle">Amur Family Home</div>
             </div>
           </div>
-          <div className="flex gap-1 text-sm items-center" id="nav-links">
-            {/* Populated by garden-app.js after auth */}
-          </div>
+          <div className="flex gap-1 text-sm items-center" id="nav-links"></div>
         </div>
       </nav>
 
       <main id="app" className="max-w-7xl mx-auto px-4 py-6"></main>
 
-      {/* LIGHTBOX */}
-      <div id="lightbox" className="modal-bg hidden" onClick={() => window.closeLightbox && window.closeLightbox()}>
+      {/* LIGHTBOX — click handler attached by garden-app.js */}
+      <div id="lightbox" className="modal-bg hidden">
         <img id="lightbox-img" className="photo-lg" src="" alt="" />
       </div>
 
       {/* LOADING OVERLAY */}
-      <div id="loading-overlay" className="modal-bg hidden flex-col gap-3">
+      <div id="loading-overlay" className="modal-bg hidden" style={{flexDirection:'column',gap:'12px'}}>
         <div className="w-10 h-10 border-4 border-green-300 border-t-white rounded-full spinner"></div>
         <div className="text-white text-sm" id="loading-msg">Loading garden data…</div>
       </div>

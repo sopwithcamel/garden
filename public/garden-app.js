@@ -1437,6 +1437,7 @@ function closeLightbox() {
   lb.classList.add('hidden'); lb.classList.remove('flex');
 }
 window.closeLightbox = closeLightbox;
+document.getElementById('lightbox').addEventListener('click', closeLightbox);
 
 function navLinks() {
   return `
