@@ -1470,6 +1470,8 @@ async function startGarden() {
 }
 
 async function init() {
+  // Debug: log config state so we can see what's happening in the console
+  console.log('[garden] init — authRequired:', isAuthRequired(), '| sessionValid:', checkAuthSession(), '| hashLen:', BAKED_HASH.length);
   if (isAuthRequired() && !checkAuthSession()) { renderLogin(); return; }
   await startGarden();
 }
